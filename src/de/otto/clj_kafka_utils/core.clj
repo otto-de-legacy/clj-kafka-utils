@@ -1,4 +1,4 @@
-(ns de.otto.kafka-utils.core
+(ns de.otto.clj-kafka-utils.core
   "Provides convenience functions for retrieving Kafka meta data.
 
   Functions with a `source` argument either accept a
