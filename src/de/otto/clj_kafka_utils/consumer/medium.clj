@@ -70,7 +70,11 @@
 
                                      (or force-reinitialization? (not consumer))
                                      (do (when consumer
-                                           (.close consumer))
+                                           (try
+                                             (.close consumer)
+                                             (catch Exception e
+                                               (log/error e "Error closing consumer")))
+                                           (Thread/sleep reconnect-delay))
                                          (if-let [leader (get (determine-leaders config topic) partition)]
                                            (assoc cstate :simple-consumer
                                                   (consumer.simple/consumer (:host leader) (:port leader) client-id))
@@ -84,21 +88,29 @@
   (with-response [this request request-fn response-fn closed-fn]
     (loop [reinitialize-consumer? false]
       (if-let [consumer (get-consumer this reinitialize-consumer?)]
-        (let [response (request-fn consumer request)]
-          (if (.hasError response)
-            (let [error-code (.errorCode response topic partition)]
-              (condp = error-code
-                (ErrorMapping/OffsetOutOfRangeCode)
-                (throw (ex-info "Offset out of range"
-                                {:offset (.. request requestInfo head _2 offset)
-                                 :partition partition
-                                 :topic topic}))
-                (do (log/warn (str "Error response code " error-code
-                                   " (" (.getName (class (ErrorMapping/exceptionFor error-code))) "),"
-                                   " reinitializing consumer"))
-                    (Thread/sleep reconnect-delay)
-                    (recur true))))
-            (response-fn response)))
+        (let [response (try
+                         (request-fn consumer request)
+                         (catch Exception e
+                           (log/error e "Error during request")
+                           false))]
+          (cond (not response)
+                (recur true)
+
+                (.hasError response)
+                (let [error-code (.errorCode response topic partition)]
+                  (condp = error-code
+                    (ErrorMapping/OffsetOutOfRangeCode)
+                    (throw (ex-info "Offset out of range"
+                                    {:offset (.. request requestInfo head _2 offset)
+                                     :partition partition
+                                     :topic topic}))
+                    (do (log/warn (str "Error response code " error-code
+                                       " (" (.getName (class (ErrorMapping/exceptionFor error-code))) "),"
+                                       " reinitializing consumer"))
+                        (recur true))))
+
+                :else
+                (response-fn response)))
         (closed-fn))))
   (topic-offset [this offset-position]
     (with-response this
