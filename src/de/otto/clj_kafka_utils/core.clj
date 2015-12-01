@@ -1,11 +1,14 @@
-(ns de.otto.clj-kafka-utils.core
+(ns de.otto.kafka-utils.core
   "Provides convenience functions for retrieving Kafka meta data.
 
   Functions with a `source` argument either accept a
   `clj-kafka.consumer.simple/SimpleConsumer` instance or a Zookeeper
   connection map. In the latter case, a one-off simple consumer will
   be instantiated."
-  (:require [clj-kafka.zk :as zk]
+  (:require zookeeper
+            [clojure.data.json :as json]
+            [clj-kafka.core :refer [with-resource]]
+            [clj-kafka.zk :as zk]
             [clj-kafka.consumer.simple :as consumer.simple])
   (:import [kafka.javaapi.consumer SimpleConsumer]))
 
@@ -14,17 +17,35 @@
   [broker client-id]
   (consumer.simple/consumer (:host broker) (:port broker) client-id))
 
-(defmacro with-consumer
-  "Binds `consumer` to a one-off SimpleConsumer instance connected to
-  the first broker found via the given Zookeeper `config`.
+(defn brokers-by-id
+  "Get brokers from zookeeper
+
+  This is the same function as clj-kafka.zk/brokers but instead of a
+  seq of broker meta data it returns a map from broker ID to broker
+  meta data.
 
   TODO: Once https://github.com/pingles/clj-kafka/pull/73 is merged
-  this needs to be switched to the broker with the ID returned from
-  `zk/controller` instead of using the first one."
+  this function can be implemented in terms of clj-kafka.zk/brokers."
+  [source]
+  (with-resource [z (zookeeper/connect (get source "zookeeper.connect"))]
+    zookeeper/close
+    (->> (zookeeper/children z "/brokers/ids")
+         (map (fn [^String id]
+                [(Long/valueOf id)
+                 (-> (zookeeper/data z (str "/brokers/ids/" id))
+                     ^bytes (:data)
+                     (String.)
+                     (json/read-str :key-fn keyword))]))
+         (into {}))))
+
+(defmacro with-consumer
+  "Binds `consumer` to a one-off SimpleConsumer instance connected to
+  the controller broker found via the given Zookeeper `config`. "
   [[consumer config] & body]
-  `(when-let [broker# (first (zk/brokers ~config))]
-     (with-open [~consumer (simple-consumer broker# "de.otto.clj-kafka-utils")]
-       ~@body)))
+  `(let [config# ~config]
+     (when-let [broker# (get (brokers-by-id config#) (zk/controller config#))]
+       (with-open [~consumer (simple-consumer broker# "de.otto.kafka-utils")]
+         ~@body))))
 
 (defn topic-meta-data
   "Wraps `clj-kafka.consumer.simple/topic-meta-data` but only accepts
