@@ -1,4 +1,4 @@
-(defproject de.otto/clj-kafka-utils "1.0.0"
+(defproject de.otto/clj-kafka-utils "1.0.1"
   :description "This library is a collection of utility functions and extensions built on top of clj-kafka"
   :url "https://github.com/otto-de/kafka-utils"
   :license {:name "Apache License 2.0"
