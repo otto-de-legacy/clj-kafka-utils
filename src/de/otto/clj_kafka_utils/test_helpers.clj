@@ -27,7 +27,10 @@
                                     "serializer.class"     "kafka.serializer.DefaultEncoder"
                                     "partitioner.class"    "kafka.producer.DefaultPartitioner"})]
     (doseq [msg msgs]
-      (producer/send-message p (producer/message topic (.getBytes msg))))))
+      (producer/send-message p (if (coll? msg)
+                                 (let [[key val] msg]
+                                   (producer/message topic key (.getBytes val)))
+                                 (producer/message topic (.getBytes msg)))))))
 
 (defn await-meta-data-propagation [server topic partition-count]
   (dotimes [partition partition-count]
